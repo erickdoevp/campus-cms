@@ -4,6 +4,7 @@ from core import openedx
 
 from .models import Product
 
+LOCKED_ONCE_CREATED = ("number", "run", "start", "end", "pacing", "authors")
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 # Studio only accepts these for the course card image.
 IMAGE_FORMATS = {"JPEG", "PNG"}
@@ -28,6 +29,13 @@ class ProductSerializer(serializers.ModelSerializer):
     def get_currency(self, obj):
         return "mxn"
 
+    def validate_price(self, price):
+        # The price is mirrored into Open edX's verified course mode, which
+        # only stores whole pesos, while the LMS plugin still does the charging.
+        if price is not None and price != price.to_integral_value():
+            raise serializers.ValidationError("Por ahora el precio va en pesos enteros, sin centavos.")
+        return price
+
     def validate_authors(self, authors):
         authors = list(dict.fromkeys(a.strip() for a in authors if a.strip()))
         try:
@@ -41,10 +49,13 @@ class ProductSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         instance = self.instance
         if instance is not None and instance.course_key:
-            # The course already exists in Open edX under this key.
-            for field in ("number", "run"):
+            # The course exists in Open edX: its key can't change, and its
+            # dates, pacing and team are managed in Studio from now on.
+            for field in LOCKED_ONCE_CREATED:
                 if field in attrs and attrs[field] != getattr(instance, field):
-                    raise serializers.ValidationError({field: "No se puede cambiar: el curso ya existe en Open edX."})
+                    raise serializers.ValidationError({field: "El curso ya existe en Open edX: esto se cambia en Studio."})
+        if instance is not None and instance.status == Product.Status.ON_SALE and "price" in attrs and not attrs["price"]:
+            raise serializers.ValidationError({"price": "Está a la venta: retíralo de la venta antes de quitarle el precio."})
         number = attrs.get("number", getattr(instance, "number", None))
         run = attrs.get("run", getattr(instance, "run", None))
         org = instance.org if instance is not None else Product._meta.get_field("org").get_default()
@@ -73,6 +84,8 @@ class ProductImageSerializer(serializers.ModelSerializer):
         # Set by the ImageField validation, which already opened it with Pillow.
         if getattr(image, "image", None) is None or image.image.format not in IMAGE_FORMATS:
             raise serializers.ValidationError("Usa una imagen JPG o PNG.")
+        # Name it after its real format: Studio picks the content type from it.
+        image.name = "image.png" if image.image.format == "PNG" else "image.jpg"
         return image
 
     def update(self, instance, validated_data):

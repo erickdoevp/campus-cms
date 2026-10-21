@@ -57,14 +57,45 @@ make tutor ARGS="dev exec campus-cms python manage.py contador <username> --remo
 | GET, POST | `/api/v1/products/` | contador | List (`?status=`) / create a product (JSON) |
 | GET, PATCH, PUT, DELETE | `/api/v1/products/{id}/` | contador | Read / edit / delete (only before it exists in Open edX) |
 | POST | `/api/v1/products/{id}/image/` | contador | Upload the image, multipart field `image` (JPG/PNG, 5 MB max) |
+| POST | `/api/v1/products/{id}/create-course/` | contador | Draft → created: creates the course in Open edX |
+| POST | `/api/v1/products/{id}/put-on-sale/` | contador | Created → on sale (needs price and image) |
+| POST | `/api/v1/products/{id}/withdraw/` | contador | On sale → created |
+| POST | `/api/v1/products/{id}/archive/` | contador | Created or on sale → archived |
 
 A product is a course for sale: title, code (`number`) and period (`run`) that
 form the course key `course-v1:{org}+{number}+{run}` (`org` comes from
 `CAMPUS_CMS_COURSE_ORG`), price in MXN, descriptions, image, dates, pacing and
 `authors` (Open edX usernames, checked against the LMS, that will get the
-instructor role). It starts as `draft`; creating it in Open edX and putting it
-on sale come next. Once it has a `course_key`, `number` and `run` are locked
-and it can only be archived, not deleted.
+instructor role).
+
+## Lifecycle and what goes to Open edX
+
+```
+draft ──create-course──► created ──put-on-sale──► on_sale
+                            ▲  ◄──────withdraw──────┘
+                            └──────► archived ◄─────┘ (archive)
+```
+
+`catalog/openedx_sync.py` makes every call as the service account:
+
+- **create-course** (needs a start date and at least one author): Studio course
+  run with title, pacing and the authors as `instructor`, then start/end dates
+  (course details API) and the card image. The course key is saved as soon as
+  the course exists and the status changes only at the end, so a `draft` with
+  a `course_key` is a creation that failed half way: calling create-course
+  again adopts the existing course and finishes it.
+- **Image**: uploading a new one also replaces it in Studio.
+- **Sale**: while the LMS payments plugin still charges, the `verified` course
+  mode exists, with the price as `min_price`, exactly while the product is
+  `on_sale`; put-on-sale creates it, a price change updates it, withdraw and
+  archive delete it. Without it the plugin shows the course as not for sale.
+  Learners who already bought keep their enrollment. Status and price change
+  in the CMS only if Open edX accepted them (otherwise the API answers 502).
+- Open edX stores `min_price` in whole pesos, so for now prices have no centavos.
+
+Once the course exists in Open edX its key (`number`, `run`), dates, pacing and
+team are managed in Studio and can't be changed here; title, descriptions,
+price and image stay in the CMS. It can only be archived, not deleted.
 
 ## Tests
 
