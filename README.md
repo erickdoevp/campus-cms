@@ -97,7 +97,11 @@ draft ──create-course──► created ──put-on-sale──► on_sale
 - **Image**: uploading a new one also replaces it in Studio.
 - **Access mode**: create-course also creates the `verified` course mode,
   which buyers are enrolled in. It is never removed (Open edX requires
-  `min_price` >= 1 on it; the value isn't used).
+  `min_price` >= 1 on it; the value isn't used) and never expires: it is
+  created with an explicit, empty expiration, because otherwise Open edX sets
+  it to the course end minus 10 days on every Studio publish and enrollments
+  start failing. Before every enrollment the CMS checks it again and fixes it
+  (a mode with a date is recreated without one).
 - **Sale**: price (centavos allowed) and put-on-sale / withdraw / archive only
   change the CMS. Buyers keep their access whatever the status.
 

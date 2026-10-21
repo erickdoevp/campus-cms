@@ -3,10 +3,13 @@ import shutil
 import tempfile
 from unittest import mock
 
+from datetime import timedelta
+
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 from PIL import Image
 
 from catalog.models import Product
@@ -70,9 +73,12 @@ class CourseLifecycleTests(TestCase):
         assert course["details"]["overview"] == ""  # the rest of the document is sent back untouched
         # A PNG uploaded as .JPG is named and typed after its real format.
         assert course["image"][:2] == ("card.png", "image/png")
-        # The mode buyers get enrolled in, ready before the first sale.
-        assert self.fake.has_verified_mode(KEY)
-        assert self.fake.modes[KEY]["verified"]["currency"] == "mxn"
+        # The mode buyers get enrolled in, ready before the first sale, and one
+        # Open edX won't expire before the course end on the next publish.
+        mode = self.fake.modes[KEY]["verified"]
+        assert (mode["currency"], mode["expiration_datetime"], mode["expiration_datetime_is_explicit"]) == ("mxn", None, True)
+        self.fake.publish(KEY, course_end=timezone.now() + timedelta(days=1))
+        assert mode["expiration_datetime"] is None
 
     def test_create_course_needs_start_and_authors(self, _user_exists):
         product_id = self.product(start=None, authors=[])

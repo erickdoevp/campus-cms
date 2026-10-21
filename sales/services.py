@@ -109,8 +109,8 @@ def create_checkout(user, course_key):
 
 def _set_enrollment(order, is_active):
     """Enroll (or unenroll) the buyer as verified, as the CMS service account."""
-    if is_active:
-        openedx_sync.ensure_access_mode(order.course_key)
+    # The enrollment API rejects both if the mode is missing or expired.
+    openedx_sync.ensure_access_mode(order.course_key)
     openedx.lms("POST", "/api/enrollment/v1/enrollment", json={
         "user": order.user.username,
         "mode": "verified",

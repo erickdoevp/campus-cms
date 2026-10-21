@@ -12,6 +12,7 @@ Price and sale status stay in the CMS: the CMS sells and grants access.
 After creation, dates, pacing and the course team belong to Studio.
 Every step can be repeated safely, so a failed sync is fixed by retrying.
 """
+import json
 import logging
 
 from core import openedx
@@ -89,17 +90,34 @@ def push_image(product):
 
 def ensure_access_mode(course_key):
     """
-    The ``verified`` course mode must exist for the enrollment API to grant
-    paid access. Open edX requires ``min_price`` >= 1 for it; the value isn't
-    used (prices live in the CMS) and there's no free mode to upsell from.
+    The ``verified`` course mode must exist, and never expire, for the
+    enrollment API to grant paid access.
+
+    - Open edX requires ``min_price`` >= 1 on it; the value isn't used (prices
+      live in the CMS) and there's no free mode to upsell from.
+    - On every Studio publish, Open edX sets its expiration to the course end
+      minus 10 days unless the mode's expiration is marked explicit; once that
+      date passes, nobody can be enrolled. So the mode is created explicit and
+      with no expiration. The API can't clear a date already set, so a mode
+      that has one is recreated (enrollments keep their "verified" mode: they
+      store it by name).
     """
     base = f"/api/course_modes/v1/courses/{course_key}/"
     modes = _call("leer modos de acceso", openedx.lms, "GET", base)
-    if not any(mode["mode_slug"] == "verified" for mode in modes):
-        _call("modo de acceso", openedx.lms, "POST", base, json={
-            "course_id": course_key, "mode_slug": "verified", "mode_display_name": "Compra",
-            "min_price": 1, "currency": "mxn",
-        })
+    verified = next((mode for mode in modes if mode["mode_slug"] == "verified"), None)
+    if verified is not None and verified.get("expiration_datetime") is None:
+        if not verified.get("expiration_datetime_is_explicit"):
+            _call("modo de acceso", openedx.lms, "PATCH", f"{base}verified",
+                  data=json.dumps({"expiration_datetime_is_explicit": True}),
+                  headers={"Content-Type": "application/merge-patch+json"})
+        return
+    if verified is not None:
+        log.info("Recreating the verified mode of %s without its expiration", course_key)
+        _call("modo de acceso", openedx.lms, "DELETE", f"{base}verified")
+    _call("modo de acceso", openedx.lms, "POST", base, json={
+        "course_id": course_key, "mode_slug": "verified", "mode_display_name": "Compra",
+        "min_price": 1, "currency": "mxn", "expiration_datetime_is_explicit": True,
+    })
 
 
 def create_course(product):

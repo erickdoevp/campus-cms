@@ -1,4 +1,6 @@
 """An in-memory Open edX: just enough of Studio and the LMS APIs the CMS calls."""
+import json
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 from core.openedx import OpenEdxError
@@ -57,7 +59,9 @@ class FakeOpenEdx:
             self._check("enroll" if kwargs["json"]["is_active"] else "unenroll")
             data = kwargs["json"]
             key = data["course_details"]["course_id"]
-            if "verified" not in self.modes.get(key, {}):
+            mode = self.modes.get(key, {}).get("verified")
+            expiration = mode and mode.get("expiration_datetime")
+            if mode is None or (expiration and datetime.fromisoformat(expiration) < datetime.now(timezone.utc)):
                 raise OpenEdxError("The [verified] course mode is expired or otherwise unavailable", 400)
             self.enrollments[(data["user"], key)] = {"mode": data["mode"], "is_active": data["is_active"]}
             return dict(self.enrollments[(data["user"], key)])
@@ -68,9 +72,27 @@ class FakeOpenEdx:
             if method == "GET":
                 return list(modes.values())
             if method == "POST":
-                modes[kwargs["json"]["mode_slug"]] = dict(kwargs["json"])
+                modes[kwargs["json"]["mode_slug"]] = {"expiration_datetime": None,
+                                                      "expiration_datetime_is_explicit": False, **kwargs["json"]}
+                return None
+            slug = path.rstrip("/").rsplit("/", 1)[1]
+            if method == "PATCH":
+                assert kwargs["headers"]["Content-Type"] == "application/merge-patch+json"
+                modes[slug].update(json.loads(kwargs["data"]))
+                return None
+            if method == "DELETE":
+                del modes[slug]
                 return None
         raise AssertionError(f"unexpected LMS call {method} {path}")
+
+    def publish(self, course_key, course_end):
+        """
+        What Open edX does on every Studio publish: a verified mode whose
+        expiration isn't explicit expires 10 days before the course end.
+        """
+        mode = self.modes.get(course_key, {}).get("verified")
+        if mode and not mode["expiration_datetime_is_explicit"]:
+            mode["expiration_datetime"] = (course_end - timedelta(days=10)).isoformat()
 
     def has_verified_mode(self, course_key):
         return "verified" in self.modes.get(course_key, {})

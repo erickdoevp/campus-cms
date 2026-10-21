@@ -182,6 +182,31 @@ class WebhookTests(SalesTestCase):
         assert self.fake.has_verified_mode(KEY)
         assert self.enrollment()["is_active"] is True
 
+    def test_course_ending_soon_still_grants_access(self):
+        """
+        Open edX expires a non-explicit verified mode 10 days before the course
+        end: with a course ending tomorrow, buyers couldn't be enrolled.
+        """
+        self.fake.modes[KEY] = {"verified": {"mode_slug": "verified", "expiration_datetime": None,
+                                             "expiration_datetime_is_explicit": False}}
+        self.fake.publish(KEY, course_end=timezone.now() + timedelta(days=1))
+
+        signed_post(self.client, session_event("evt_1", "checkout.session.completed", self.make_order()))
+
+        assert self.enrollment() == {"mode": "verified", "is_active": True}
+        mode = self.fake.modes[KEY]["verified"]
+        assert (mode["expiration_datetime"], mode["expiration_datetime_is_explicit"]) == (None, True)
+        self.fake.publish(KEY, course_end=timezone.now() + timedelta(days=1))
+        assert mode["expiration_datetime"] is None  # the next publish leaves it alone
+
+    def test_mode_without_expiration_is_marked_explicit(self):
+        self.fake.modes[KEY] = {"verified": {"mode_slug": "verified", "expiration_datetime": None,
+                                             "expiration_datetime_is_explicit": False}}
+        signed_post(self.client, session_event("evt_1", "checkout.session.completed", self.make_order()))
+        assert "modes-delete" not in self.fake.calls
+        assert self.fake.modes[KEY]["verified"]["expiration_datetime_is_explicit"] is True
+        assert self.enrollment()["is_active"] is True
+
     @mock.patch("stripe.Refund.create")
     def test_second_payment_for_same_course_is_refunded(self, refund_create):
         first = self.make_order()
