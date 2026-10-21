@@ -175,9 +175,11 @@ def _record_payment(session):
             payment_intent=payment_intent,
             idempotency_key=f"campus-cms-duplicate-{order.pk}",
         )
+        # The money did come in, and went straight back.
         order.status = Order.Status.REFUNDED
+        order.paid_at = order.refunded_at = timezone.now()
         order.stripe_payment_intent_id = payment_intent
-        order.save(update_fields=["status", "stripe_payment_intent_id", "modified"])
+        order.save(update_fields=["status", "paid_at", "refunded_at", "stripe_payment_intent_id", "modified"])
         log.warning("Order %s: duplicate payment for %s by %s refunded", order.pk, order.course_key, order.user.username)
         return order
 
@@ -222,6 +224,7 @@ def refund_charge(charge):
         if order is None:
             return None
         order.status = Order.Status.REFUNDED
-        order.save(update_fields=["status", "modified"])
+        order.refunded_at = timezone.now()
+        order.save(update_fields=["status", "refunded_at", "modified"])
     log.info("Order %s refunded", order.pk)
     return sync_access(order)

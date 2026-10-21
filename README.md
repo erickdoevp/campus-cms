@@ -61,6 +61,9 @@ make tutor ARGS="dev exec campus-cms python manage.py contador <username> --remo
 | POST | `/api/v1/checkout/` | logged in | `{"course_id"}` → `{"order_id", "checkout_url"}`; errors `{"code": "course_not_found" \| "not_purchasable" \| "already_owned" \| "payment_unavailable"}` |
 | GET | `/api/v1/me/orders/` | logged in | The user's orders |
 | POST | `/api/v1/webhooks/stripe/` | Stripe signature | Stripe events |
+| GET | `/api/v1/stats/?from=&to=` | contador | Dashboard figures for a period (dates `YYYY-MM-DD`, default last 30 days, up to a year) |
+| GET | `/api/v1/orders/` | contador | Every order, 50 per page; `?status=`, `?access=`, `?course_key=`, `?q=` (username or email) |
+| POST | `/api/v1/orders/{id}/retry-access/` | contador | Retry the Open edX access of an order now, without waiting for `reconcile_orders` |
 | GET, POST | `/api/v1/products/` | contador | List (`?status=`) / create a product (JSON) |
 | GET, PATCH, PUT, DELETE | `/api/v1/products/{id}/` | contador | Read / edit / delete (only before it exists in Open edX) |
 | POST | `/api/v1/products/{id}/image/` | contador | Upload the image, multipart field `image` (JPG/PNG, 5 MB max) |
@@ -131,6 +134,20 @@ make tutor ARGS="dev exec campus-cms python manage.py reconcile_orders"
 ```
 
 Stripe test webhooks reach the local CMS with `make stripe` (from `plataforma-equipo`).
+
+## Dashboard figures
+
+`sales/stats.py`, in MXN and by local day (`TIME_ZONE`, Mexico City):
+
+- **gross** ("Entró"): orders paid in the period, by `paid_at`, including ones refunded later;
+- **refunds**: orders refunded in the period, by `refunded_at`;
+- **net**: gross − refunds (a day with more refunds than sales goes negative).
+
+Each response also has the same totals for the same number of days right
+before (`previous`, for the % change), a series per day (per week, starting on
+Monday, past 62 days), a row per course (any with movement, plus those on
+sale), and what needs attention now regardless of the period: orders whose
+access failed and pending orders. Amounts are strings ("1234.50"), never floats.
 
 ## Tests
 

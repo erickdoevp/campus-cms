@@ -38,7 +38,9 @@ class Order(models.Model):
     access_error = models.TextField(blank=True)
     stripe_checkout_session_id = models.CharField(max_length=255, unique=True, null=True, blank=True)
     stripe_payment_intent_id = models.CharField(max_length=255, blank=True, db_index=True)
-    paid_at = models.DateTimeField(null=True, blank=True)
+    # When the money came in and when it went back: what the stats count by.
+    paid_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    refunded_at = models.DateTimeField(null=True, blank=True, db_index=True)
     # True only while status is PAID, NULL otherwise. MySQL ignores conditional
     # unique constraints but allows repeated NULLs in a unique index, so this
     # enforces "at most one paid order per user and product".

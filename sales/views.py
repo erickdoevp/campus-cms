@@ -1,19 +1,25 @@
 import json
 import logging
+from datetime import date, timedelta
 
 import stripe
 from django.conf import settings
 from django.db import IntegrityError
+from django.db.models import Q
 from django.http import HttpResponse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
-from rest_framework import serializers
-from rest_framework.decorators import api_view
+from rest_framework import serializers, viewsets
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.generics import ListAPIView
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
+from core.permissions import IsContador
+
 from . import services
+from . import stats as sales_stats
 from .models import Order, PaymentEvent
 
 log = logging.getLogger(__name__)
@@ -97,3 +103,73 @@ def stripe_webhook(request):
     record.processed_at = timezone.now()
     record.save(update_fields=["order", "processed_at"])
     return HttpResponse(status=200)
+
+
+# --- for the accountant ------------------------------------------------------
+
+
+MAX_RANGE_DAYS = 366
+
+
+@api_view(["GET"])
+@permission_classes([IsContador])
+def stats(request):
+    """
+    GET /api/v1/stats/?from=YYYY-MM-DD&to=YYYY-MM-DD — sales figures for the
+    dashboard (see sales/stats.py for what each number means). Defaults to the
+    last 30 days, today included, in the CMS time zone.
+    """
+    today = timezone.localdate()
+    try:
+        end = date.fromisoformat(request.query_params.get("to") or today.isoformat())
+        start = date.fromisoformat(request.query_params.get("from") or (end - timedelta(days=29)).isoformat())
+    except ValueError:
+        return Response({"detail": "Usa fechas AAAA-MM-DD."}, status=400)
+    if start > end:
+        return Response({"detail": "La fecha inicial va antes de la final."}, status=400)
+    if (end - start).days >= MAX_RANGE_DAYS:
+        return Response({"detail": "El periodo puede ser de hasta un año."}, status=400)
+    return Response(sales_stats.dashboard(start, end))
+
+
+class AdminOrderSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(source="user.username")
+    email = serializers.CharField(source="user.email")
+    course_title = serializers.CharField(source="product.title")
+
+    class Meta:
+        model = Order
+        fields = ("id", "username", "email", "course_key", "course_title", "amount", "currency", "status", "access",
+                  "access_error", "created", "paid_at", "refunded_at")
+
+
+class OrderPagination(PageNumberPagination):
+    page_size = 50
+
+
+class OrderViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    /api/v1/orders/ — every order, newest first, 50 per page.
+    Filters: ?status=, ?access=, ?course_key=, ?q= (username or email).
+    POST /api/v1/orders/{id}/retry-access/ — try again to give (or remove) the
+    Open edX access that failed, without waiting for reconcile_orders.
+    """
+
+    serializer_class = AdminOrderSerializer
+    permission_classes = [IsContador]
+    pagination_class = OrderPagination
+
+    def get_queryset(self):
+        queryset = Order.objects.select_related("user", "product")
+        params = self.request.query_params
+        for field in ("status", "access", "course_key"):
+            if params.get(field):
+                queryset = queryset.filter(**{field: params[field]})
+        if params.get("q"):
+            queryset = queryset.filter(Q(user__username__icontains=params["q"]) | Q(user__email__icontains=params["q"]))
+        return queryset
+
+    @action(detail=True, methods=["post"], url_path="retry-access")
+    def retry_access(self, request, pk=None):
+        order = services.sync_access(self.get_object())
+        return Response(self.get_serializer(order).data)
