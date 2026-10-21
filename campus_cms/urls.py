@@ -10,6 +10,7 @@ urlpatterns = [
     path("api/health/", health, name="health"),
     path("api/v1/me/", me, name="me"),
     path("api/v1/", include("catalog.urls")),
+    path("api/v1/", include("sales.urls")),
 ]
 
 if settings.DEBUG:

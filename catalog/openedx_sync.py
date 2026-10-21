@@ -4,17 +4,14 @@ Writes a product to Open edX, as the CMS service account.
 What the CMS sends, and when:
 - Creating the course (once): Studio course run with title, pacing and the
   authors as instructors, then the dates and the card image.
+- The ``verified`` course mode, which buyers are enrolled in (see sales).
 - The image, again whenever it changes.
-- The sale, mirrored into the ``verified`` course mode while the payments
-  plugin in the LMS still does the charging: the mode exists, with the price
-  as ``min_price``, exactly while the product is on sale. Without it the
-  plugin doesn't sell the course (and Open edX refuses a verified mode at 0).
-  Learners who already bought keep their ``verified`` enrollment.
+
+Price and sale status stay in the CMS: the CMS sells and grants access.
 
 After creation, dates, pacing and the course team belong to Studio.
 Every step can be repeated safely, so a failed sync is fixed by retrying.
 """
-import json
 import logging
 
 from core import openedx
@@ -90,22 +87,19 @@ def push_image(product):
         })
 
 
-def sync_sale_mode(product):
-    base = f"/api/course_modes/v1/courses/{product.course_key}/"
-    modes = _call("leer precio", openedx.lms, "GET", base)
-    exists = any(mode["mode_slug"] == "verified" for mode in modes)
-    on_sale = product.status == Product.Status.ON_SALE
-    if on_sale and exists:
-        _call("precio", openedx.lms, "PATCH", f"{base}verified",
-              data=json.dumps({"min_price": int(product.price), "currency": "mxn"}),
-              headers={"Content-Type": "application/merge-patch+json"})
-    elif on_sale:
-        _call("precio", openedx.lms, "POST", base, json={
-            "course_id": product.course_key, "mode_slug": "verified", "mode_display_name": "Compra",
-            "min_price": int(product.price), "currency": "mxn",
+def ensure_access_mode(course_key):
+    """
+    The ``verified`` course mode must exist for the enrollment API to grant
+    paid access. Open edX requires ``min_price`` >= 1 for it; the value isn't
+    used (prices live in the CMS) and there's no free mode to upsell from.
+    """
+    base = f"/api/course_modes/v1/courses/{course_key}/"
+    modes = _call("leer modos de acceso", openedx.lms, "GET", base)
+    if not any(mode["mode_slug"] == "verified" for mode in modes):
+        _call("modo de acceso", openedx.lms, "POST", base, json={
+            "course_id": course_key, "mode_slug": "verified", "mode_display_name": "Compra",
+            "min_price": 1, "currency": "mxn",
         })
-    elif exists:
-        _call("retirar de la venta", openedx.lms, "DELETE", f"{base}verified")
 
 
 def create_course(product):
@@ -117,6 +111,7 @@ def create_course(product):
     ensure_course(product)
     push_dates(product)
     push_image(product)
+    ensure_access_mode(product.course_key)
     if product.status == Product.Status.DRAFT:
         product.status = Product.Status.CREATED
         product.save(update_fields=["status", "modified"])

@@ -1,7 +1,9 @@
 # campus-cms
 
 Back office for Campus (Django + DRF). The accountant creates courses, sets
-their price (MXN) and, later, sees sales and stats. Open edX keeps the course
+their price (MXN) and, later, sees sales and stats. It also sells them: Stripe
+checkout, webhooks, orders, and the course access in Open edX that comes with
+a payment. Open edX keeps the course
 content (authored in Studio), users, enrollments and progress; the CMS owns
 the product: price, sale status, marketing content, orders and payments.
 Both sides are linked by the course key (`course-v1:Org+Number+Run`).
@@ -56,6 +58,9 @@ make tutor ARGS="dev exec campus-cms python manage.py contador <username> --remo
 | GET | `/api/v1/me/` | logged in | `{username, email, is_contador}` |
 | GET | `/api/v1/catalog/` | anyone | Courses on sale, for the public site: `{id (course key), title, org, number, short_description, description, image, price, currency, on_sale}` |
 | GET | `/api/v1/catalog/{course_key}/` | anyone | One of them; archived courses are found too (`on_sale: false`), drafts and created ones aren't |
+| POST | `/api/v1/checkout/` | logged in | `{"course_id"}` → `{"order_id", "checkout_url"}`; errors `{"code": "course_not_found" \| "not_purchasable" \| "already_owned" \| "payment_unavailable"}` |
+| GET | `/api/v1/me/orders/` | logged in | The user's orders |
+| POST | `/api/v1/webhooks/stripe/` | Stripe signature | Stripe events |
 | GET, POST | `/api/v1/products/` | contador | List (`?status=`) / create a product (JSON) |
 | GET, PATCH, PUT, DELETE | `/api/v1/products/{id}/` | contador | Read / edit / delete (only before it exists in Open edX) |
 | POST | `/api/v1/products/{id}/image/` | contador | Upload the image, multipart field `image` (JPG/PNG, 5 MB max) |
@@ -87,17 +92,45 @@ draft ──create-course──► created ──put-on-sale──► on_sale
   a `course_key` is a creation that failed half way: calling create-course
   again adopts the existing course and finishes it.
 - **Image**: uploading a new one also replaces it in Studio.
-- **Sale**: while the LMS payments plugin still charges, the `verified` course
-  mode exists, with the price as `min_price`, exactly while the product is
-  `on_sale`; put-on-sale creates it, a price change updates it, withdraw and
-  archive delete it. Without it the plugin shows the course as not for sale.
-  Learners who already bought keep their enrollment. Status and price change
-  in the CMS only if Open edX accepted them (otherwise the API answers 502).
-- Open edX stores `min_price` in whole pesos, so for now prices have no centavos.
+- **Access mode**: create-course also creates the `verified` course mode,
+  which buyers are enrolled in. It is never removed (Open edX requires
+  `min_price` >= 1 on it; the value isn't used).
+- **Sale**: price (centavos allowed) and put-on-sale / withdraw / archive only
+  change the CMS. Buyers keep their access whatever the status.
 
 Once the course exists in Open edX its key (`number`, `run`), dates, pacing and
 team are managed in Studio and can't be changed here; title, descriptions,
 price and image stay in the CMS. It can only be archived, not deleted.
+
+## Sales
+
+1. Campus' `/comprar/{course_id}` calls `POST /api/v1/checkout/` as the user: a
+   `pending` Order and a Stripe Checkout Session (price in centavos, MXN). An
+   open session for the same user, product and price is reused, so two tabs
+   don't make two payable checkouts.
+2. Stripe calls `POST /api/v1/webhooks/stripe/` (verified with the signing
+   secret, deduplicated by event id in `PaymentEvent`):
+   - `checkout.session.completed` (card, paid) → Order `paid`, then access.
+   - OXXO: `completed` arrives unpaid; `checkout.session.async_payment_succeeded` pays it.
+   - `checkout.session.expired` / `async_payment_failed` → Order `failed`.
+   - `charge.refunded` (full) → Order `refunded`, access removed. Partial refunds keep it.
+   - A second payment for a course already paid is refunded automatically.
+3. **Access** is a separate field (`Order.access`): after the payment is saved,
+   the CMS enrolls the buyer as `verified` through the LMS enrollment API (and
+   creates the course mode if missing). If Open edX fails, Stripe still gets a
+   200, the order stays `paid` with access `error`, and `reconcile_orders`
+   retries it.
+
+`reconcile_orders` (run it daily, and after an Open edX outage) retries access
+for paid/refunded orders, settles with Stripe pending orders older than 24 h
+whose webhook never came, and reports active `verified` enrollments with no
+paid order:
+
+```bash
+make tutor ARGS="dev exec campus-cms python manage.py reconcile_orders"
+```
+
+Stripe test webhooks reach the local CMS with `make stripe` (from `plataforma-equipo`).
 
 ## Tests
 
@@ -120,6 +153,8 @@ make tutor ARGS="dev exec campus-cms python manage.py test"
 | `CAMPUS_CMS_OPENEDX_JWT_ISSUER` | `http://local.openedx.io/oauth2` |
 | `CAMPUS_CMS_OPENEDX_JWT_AUDIENCE` | `openedx` |
 | `CAMPUS_CMS_COURSE_ORG` | `Campus` |
+| `CAMPUS_CMS_STRIPE_SECRET_KEY` / `_WEBHOOK_SECRET` | `""` (from each machine's `.env`; test keys only) |
+| `CAMPUS_CMS_PUBLIC_SITE_URL` | `http://www.local.openedx.io:3000` (Stripe returns buyers to `/cursos/{course_key}`) |
 
 In development the Tutor plugin sets all of them; the secrets are generated
 once per machine and stored in `.tutor/config.yml`.

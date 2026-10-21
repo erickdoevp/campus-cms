@@ -29,13 +29,6 @@ class ProductSerializer(serializers.ModelSerializer):
     def get_currency(self, obj):
         return "mxn"
 
-    def validate_price(self, price):
-        # The price is mirrored into Open edX's verified course mode, which
-        # only stores whole pesos, while the LMS plugin still does the charging.
-        if price is not None and price != price.to_integral_value():
-            raise serializers.ValidationError("Por ahora el precio va en pesos enteros, sin centavos.")
-        return price
-
     def validate_authors(self, authors):
         authors = list(dict.fromkeys(a.strip() for a in authors if a.strip()))
         try:
@@ -111,7 +104,7 @@ class CatalogSerializer(serializers.ModelSerializer):
                   "price", "currency", "on_sale")
 
     def get_price(self, obj):
-        return int(obj.price) if obj.price is not None else None
+        return float(obj.price) if obj.price is not None else None
 
     def get_currency(self, obj):
         return "mxn"

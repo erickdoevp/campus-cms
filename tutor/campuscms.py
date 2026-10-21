@@ -24,6 +24,11 @@ hooks.Filters.CONFIG_DEFAULTS.add_items(
         ("CAMPUS_CMS_MYSQL_USERNAME", "campus_cms"),
         ("CAMPUS_CMS_SERVICE_USERNAME", "campus_cms_worker"),
         ("CAMPUS_CMS_OAUTH2_CLIENT_ID", "campus-cms-service"),
+        # Stripe keys come from each machine's .env (test keys only), never from the repo.
+        ("CAMPUS_CMS_STRIPE_SECRET_KEY", ""),
+        ("CAMPUS_CMS_STRIPE_WEBHOOK_SECRET", ""),
+        # Public site where Stripe sends buyers back.
+        ("CAMPUS_CMS_PUBLIC_SITE_URL", "http://www.local.openedx.io:3000"),
     ]
 )
 
@@ -55,6 +60,9 @@ _ENVIRONMENT = """
     CAMPUS_CMS_OPENEDX_JWT_PUBLIC_JWK_SET: '{"keys": [{"kid": "openedx", "kty": "RSA", "e": "{{ jwt_rsa_key.e|long_to_base64 }}", "n": "{{ jwt_rsa_key.n|long_to_base64 }}"}]}'
     CAMPUS_CMS_OPENEDX_JWT_ISSUER: "{{ JWT_COMMON_ISSUER }}"
     CAMPUS_CMS_OPENEDX_JWT_AUDIENCE: "{{ JWT_COMMON_AUDIENCE }}"
+    CAMPUS_CMS_STRIPE_SECRET_KEY: "{{ CAMPUS_CMS_STRIPE_SECRET_KEY }}"
+    CAMPUS_CMS_STRIPE_WEBHOOK_SECRET: "{{ CAMPUS_CMS_STRIPE_WEBHOOK_SECRET }}"
+    CAMPUS_CMS_PUBLIC_SITE_URL: "{{ CAMPUS_CMS_PUBLIC_SITE_URL }}"
   volumes:
     - "REPO:/app"
   depends_on: {{ [("mysql", RUN_MYSQL)]|list_if }}

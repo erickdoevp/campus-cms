@@ -1,4 +1,3 @@
-from django.db import transaction
 from rest_framework import parsers, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import APIException, ValidationError
@@ -50,14 +49,6 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
-
-    def perform_update(self, serializer):
-        old_price = serializer.instance.price
-        # If Open edX rejects the new price, the CMS keeps the old one too.
-        with transaction.atomic():
-            product = serializer.save()
-            if product.status == Product.Status.ON_SALE and product.price != old_price:
-                _sync(openedx_sync.sync_sale_mode, product)
 
     def perform_destroy(self, instance):
         if instance.course_key:
@@ -114,11 +105,9 @@ class ProductViewSet(viewsets.ModelViewSet):
         return self._change_status(product, Product.Status.ARCHIVED)
 
     def _change_status(self, product, new_status):
-        # The status decides whether Open edX sells it: both change or neither.
-        with transaction.atomic():
-            product.status = new_status
-            product.save(update_fields=["status", "modified"])
-            _sync(openedx_sync.sync_sale_mode, product)
+        # Only the CMS sells, so this doesn't touch Open edX: buyers keep their access.
+        product.status = new_status
+        product.save(update_fields=["status", "modified"])
         return self._product_response(product)
 
     def _product_response(self, product):

@@ -1,5 +1,4 @@
 import io
-import json
 import shutil
 import tempfile
 from unittest import mock
@@ -11,73 +10,12 @@ from django.urls import reverse
 from PIL import Image
 
 from catalog.models import Product
-from core.openedx import OpenEdxError
 from core.tests.utils import auth_header, use_test_jwt_keys
+
+from .fake_openedx import FakeOpenEdx
 
 MEDIA_ROOT = tempfile.mkdtemp()
 KEY = "course-v1:Campus+CONT101+2026_T1"
-
-
-class FakeOpenEdx:
-    """Just enough of Studio and the LMS course modes API, in memory."""
-
-    def __init__(self):
-        self.courses = {}  # course_key -> {"title", "pacing_type", "team", "details", "image"}
-        self.modes = {}    # course_key -> {"verified": {...}}
-        self.calls = []
-        self.fail = set()  # step names that answer 500
-
-    def _check(self, name):
-        self.calls.append(name)
-        if name in self.fail:
-            raise OpenEdxError(f"{name} failed", 500)
-
-    def studio(self, method, path, **kwargs):
-        if method == "POST" and path == "/api/v1/course_runs/":
-            self._check("create")
-            data = kwargs["json"]
-            key = f"course-v1:{data['org']}+{data['number']}+{data['run']}"
-            self.courses[key] = {**data, "details": {"start_date": None, "end_date": None, "overview": ""}, "image": None}
-            return {"id": key}
-        if path.startswith("/api/v1/course_runs/"):
-            key = path.split("/")[4]
-            if key not in self.courses:
-                raise OpenEdxError("not found", 404)
-            if path.endswith("/images/"):
-                self._check("image")
-                name, file, content_type = kwargs["files"]["card_image"]
-                self.courses[key]["image"] = (name, content_type, file.read()[:4])
-            elif method == "PATCH":
-                self._check("team")
-                self.courses[key]["team"] += [m for m in kwargs["json"]["team"] if m not in self.courses[key]["team"]]
-            return {"id": key}
-        if path.startswith("/api/contentstore/v1/course_details/"):
-            key = path.rsplit("/", 1)[1]
-            self._check(f"details-{method.lower()}")
-            if method == "PUT":
-                self.courses[key]["details"] = kwargs["json"]
-            return dict(self.courses[key]["details"])
-        raise AssertionError(f"unexpected Studio call {method} {path}")
-
-    def lms(self, method, path, **kwargs):
-        key = path.split("/")[5]
-        modes = self.modes.setdefault(key, {})
-        self._check(f"modes-{method.lower()}")
-        if method == "GET":
-            return list(modes.values())
-        if method == "POST":
-            modes[kwargs["json"]["mode_slug"]] = dict(kwargs["json"])
-        elif method == "PATCH":
-            assert kwargs["headers"]["Content-Type"] == "application/merge-patch+json"
-            modes["verified"].update(json.loads(kwargs["data"]))
-        elif method == "DELETE":
-            del modes["verified"]
-        return None
-
-    def verified_price(self, key=KEY):
-        """The price the LMS plugin would charge, or None if it doesn't sell the course."""
-        mode = self.modes.get(key, {}).get("verified")
-        return mode and mode["min_price"]
 
 
 def png():
@@ -98,11 +36,7 @@ class CourseLifecycleTests(TestCase):
     def setUp(self):
         call_command("contador", "contadora")
         self.auth = auth_header(username="contadora")
-        self.fake = FakeOpenEdx()
-        for name in ("studio", "lms"):
-            patcher = mock.patch(f"core.openedx.{name}", side_effect=getattr(self.fake, name))
-            patcher.start()
-            self.addCleanup(patcher.stop)
+        self.fake = FakeOpenEdx().install(self)
 
     def product(self, **data):
         payload = {"title": "Contabilidad básica", "number": "CONT101", "run": "2026_T1", "price": "1499",
@@ -136,8 +70,9 @@ class CourseLifecycleTests(TestCase):
         assert course["details"]["overview"] == ""  # the rest of the document is sent back untouched
         # A PNG uploaded as .JPG is named and typed after its real format.
         assert course["image"][:2] == ("card.png", "image/png")
-        # Not on sale yet: no verified mode, so the LMS plugin doesn't sell it.
-        assert self.fake.verified_price() is None
+        # The mode buyers get enrolled in, ready before the first sale.
+        assert self.fake.has_verified_mode(KEY)
+        assert self.fake.modes[KEY]["verified"]["currency"] == "mxn"
 
     def test_create_course_needs_start_and_authors(self, _user_exists):
         product_id = self.product(start=None, authors=[])
@@ -168,42 +103,33 @@ class CourseLifecycleTests(TestCase):
         self.post(product_id, "create-course")
         assert self.post(product_id, "create-course").status_code == 400
 
-    def test_sale_lifecycle_mirrors_the_price(self, _user_exists):
+    def test_sale_lifecycle_stays_in_the_cms(self, _user_exists):
         product_id = self.product()
         self.post(product_id, "create-course")
 
         response = self.post(product_id, "put-on-sale")
         assert response.status_code == 400  # no image yet
         self.post(product_id, "image", data={"image": png()})
+        self.fake.calls.clear()
 
         assert self.post(product_id, "put-on-sale").json()["status"] == "on_sale"
-        assert self.fake.verified_price() == 1499
-        assert self.fake.modes[KEY]["verified"]["currency"] == "mxn"
-
-        assert self.patch(product_id, {"price": "1299"}).status_code == 200
-        assert self.fake.verified_price() == 1299
-
+        assert self.patch(product_id, {"price": "1299.50"}).json()["price"] == "1299.50"
         assert self.post(product_id, "withdraw").json()["status"] == "created"
-        assert self.fake.verified_price() is None
-
         self.post(product_id, "put-on-sale")
-        assert self.fake.verified_price() == 1299
         assert self.post(product_id, "archive").json()["status"] == "archived"
-        assert self.fake.verified_price() is None
+        # Only the CMS sells: buyers keep their verified mode and enrollments.
+        assert self.fake.calls == []
+        assert self.fake.has_verified_mode(KEY)
 
-    def test_open_edx_failure_keeps_cms_unchanged(self, _user_exists):
+    def test_access_mode_failure_leaves_a_retryable_creation(self, _user_exists):
         product_id = self.product()
-        self.post(product_id, "image", data={"image": png()})
-        self.post(product_id, "create-course")
         self.fake.fail.add("modes-post")
-        assert self.post(product_id, "put-on-sale").status_code == 502
-        assert Product.objects.get().status == "created"
+        assert self.post(product_id, "create-course").status_code == 502
+        assert Product.objects.get().status == "draft"
 
-        self.fake.fail = {"modes-patch"}
-        assert self.post(product_id, "put-on-sale").status_code == 200
-        assert self.patch(product_id, {"price": "999"}).status_code == 502
-        assert str(Product.objects.get().price) == "1499.00"
-        assert self.fake.verified_price() == 1499
+        self.fake.fail.clear()
+        assert self.post(product_id, "create-course").json()["status"] == "created"
+        assert self.fake.has_verified_mode(KEY)
 
     def test_studio_owns_dates_pacing_and_team_once_created(self, _user_exists):
         product_id = self.product()
@@ -221,11 +147,11 @@ class CourseLifecycleTests(TestCase):
         self.post(product_id, "image", data={"image": png()})
         assert self.fake.courses[KEY]["image"][0] == "card.png"
 
-    def test_price_must_be_whole_pesos(self, _user_exists):
+    def test_price_can_have_centavos(self, _user_exists):
         response = self.client.post(reverse("product-list"), {"title": "X", "number": "X1", "run": "R1", "price": "99.50"},
                                     content_type="application/json", **self.auth)
-        assert response.status_code == 400
-        assert "price" in response.json()
+        assert response.status_code == 201
+        assert response.json()["price"] == "99.50"
 
     def test_price_cannot_be_removed_while_on_sale(self, _user_exists):
         product_id = self.product()
@@ -235,4 +161,4 @@ class CourseLifecycleTests(TestCase):
         for price in (None, "0"):
             with self.subTest(price):
                 assert self.patch(product_id, {"price": price}).status_code == 400
-        assert self.fake.verified_price() == 1499
+        assert str(Product.objects.get().price) == "1499.00"

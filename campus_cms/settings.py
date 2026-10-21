@@ -31,6 +31,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "core",
     "catalog",
+    "sales",
 ]
 
 MIDDLEWARE = [
@@ -113,3 +114,10 @@ OPENEDX_JWT_AUDIENCE = env("CAMPUS_CMS_OPENEDX_JWT_AUDIENCE", "openedx")
 
 # Organization of every course the CMS creates (first part of the course key).
 COURSE_ORG = env("CAMPUS_CMS_COURSE_ORG", "Campus")
+
+# Stripe (test keys in development: sk_test_..., never sk_live_ in a repo).
+STRIPE_SECRET_KEY = env("CAMPUS_CMS_STRIPE_SECRET_KEY")
+STRIPE_WEBHOOK_SECRET = env("CAMPUS_CMS_STRIPE_WEBHOOK_SECRET")
+
+# Public site (Campus), where Stripe sends the buyer back: /cursos/{course_key}.
+PUBLIC_SITE_URL = env("CAMPUS_CMS_PUBLIC_SITE_URL", "http://www.local.openedx.io:3000").rstrip("/")
