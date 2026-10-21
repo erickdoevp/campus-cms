@@ -90,7 +90,7 @@ class ProductApiTests(TestCase):
         url = reverse("product-detail", args=[product_id])
         response = self.client.patch(url, {"run": "2026_T2"}, content_type="application/json", **self.auth)
         assert response.status_code == 400
-        response = self.client.patch(url, {"price": "999"}, content_type="application/json", **self.auth)
+        response = self.client.patch(url, {"title": "Otro título"}, content_type="application/json", **self.auth)
         assert response.status_code == 200
 
     def test_upload_and_replace_image(self, _user_exists):
