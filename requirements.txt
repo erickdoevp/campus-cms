@@ -1,0 +1,4 @@
+Django==5.2.*
+djangorestframework==3.16.*
+mysqlclient==2.2.*
+requests==2.32.*
