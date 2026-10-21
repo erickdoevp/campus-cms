@@ -1,5 +1,5 @@
 from django.db import transaction
-from rest_framework import parsers, status, viewsets
+from rest_framework import parsers, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import APIException, ValidationError
 from rest_framework.response import Response
@@ -8,7 +8,7 @@ from core.permissions import IsContador
 
 from . import openedx_sync
 from .models import Product
-from .serializers import ProductImageSerializer, ProductSerializer
+from .serializers import CatalogSerializer, ProductImageSerializer, ProductSerializer
 
 
 class OpenEdxUnavailable(APIException):
@@ -123,3 +123,26 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     def _product_response(self, product):
         return Response(ProductSerializer(product, context=self.get_serializer_context()).data)
+
+
+class CatalogViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    /api/v1/catalog/ — public: the courses on sale, for the public site.
+    /api/v1/catalog/{course_key}/ — one of them; archived courses are still
+    found (buyers keep their access and may land on the page), others aren't.
+
+    Only the commercial side: dates, pacing and content come from Open edX.
+    """
+
+    serializer_class = CatalogSerializer
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+    lookup_field = "course_key"
+    lookup_value_regex = "[^/]+"
+
+    def get_queryset(self):
+        if self.action == "retrieve":
+            statuses = (Product.Status.ON_SALE, Product.Status.ARCHIVED)
+        else:
+            statuses = (Product.Status.ON_SALE,)
+        return Product.objects.filter(status__in=statuses, course_key__isnull=False).order_by("-created")

@@ -94,3 +94,27 @@ class ProductImageSerializer(serializers.ModelSerializer):
         if old and old != instance.image.name:
             instance.image.storage.delete(old)
         return instance
+
+
+class CatalogSerializer(serializers.ModelSerializer):
+    """What the public site shows of a product: the commercial side only."""
+
+    id = serializers.CharField(source="course_key")
+    image = serializers.ImageField(read_only=True)
+    price = serializers.SerializerMethodField()
+    currency = serializers.SerializerMethodField()
+    on_sale = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Product
+        fields = ("id", "title", "org", "number", "short_description", "description", "image",
+                  "price", "currency", "on_sale")
+
+    def get_price(self, obj):
+        return int(obj.price) if obj.price is not None else None
+
+    def get_currency(self, obj):
+        return "mxn"
+
+    def get_on_sale(self, obj):
+        return obj.status == Product.Status.ON_SALE

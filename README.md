@@ -54,6 +54,8 @@ make tutor ARGS="dev exec campus-cms python manage.py contador <username> --remo
 |---|---|---|---|
 | GET | `/api/health/` | anyone | Service and database are up |
 | GET | `/api/v1/me/` | logged in | `{username, email, is_contador}` |
+| GET | `/api/v1/catalog/` | anyone | Courses on sale, for the public site: `{id (course key), title, org, number, short_description, description, image, price, currency, on_sale}` |
+| GET | `/api/v1/catalog/{course_key}/` | anyone | One of them; archived courses are found too (`on_sale: false`), drafts and created ones aren't |
 | GET, POST | `/api/v1/products/` | contador | List (`?status=`) / create a product (JSON) |
 | GET, PATCH, PUT, DELETE | `/api/v1/products/{id}/` | contador | Read / edit / delete (only before it exists in Open edX) |
 | POST | `/api/v1/products/{id}/image/` | contador | Upload the image, multipart field `image` (JPG/PNG, 5 MB max) |
