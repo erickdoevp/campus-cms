@@ -30,6 +30,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "core",
+    "catalog",
 ]
 
 MIDDLEWARE = [
@@ -89,7 +90,10 @@ STATIC_ROOT = BASE_DIR / "static"
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+# The API only takes the Open edX JWT in the Authorization header (Campus'
+# server builds it from the LMS cookies). No session auth, so no CSRF.
 REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": ["core.authentication.OpenEdxJwtAuthentication"],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
 }
 
@@ -100,3 +104,12 @@ OPENEDX_LMS_URL = env("CAMPUS_CMS_OPENEDX_LMS_URL", "http://local.openedx.io:800
 OPENEDX_STUDIO_URL = env("CAMPUS_CMS_OPENEDX_STUDIO_URL", "http://cms:8000").rstrip("/")
 OPENEDX_OAUTH2_CLIENT_ID = env("CAMPUS_CMS_OAUTH2_CLIENT_ID")
 OPENEDX_OAUTH2_CLIENT_SECRET = env("CAMPUS_CMS_OAUTH2_CLIENT_SECRET")
+
+# Users log in to the LMS; the CMS validates the JWT the LMS puts in its
+# cookies (signed with the LMS private key, verified with this public set).
+OPENEDX_JWT_PUBLIC_JWK_SET = env("CAMPUS_CMS_OPENEDX_JWT_PUBLIC_JWK_SET", '{"keys": []}')
+OPENEDX_JWT_ISSUER = env("CAMPUS_CMS_OPENEDX_JWT_ISSUER", "http://local.openedx.io/oauth2")
+OPENEDX_JWT_AUDIENCE = env("CAMPUS_CMS_OPENEDX_JWT_AUDIENCE", "openedx")
+
+# Organization of every course the CMS creates (first part of the course key).
+COURSE_ORG = env("CAMPUS_CMS_COURSE_ORG", "Campus")

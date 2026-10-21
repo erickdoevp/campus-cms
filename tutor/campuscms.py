@@ -36,6 +36,7 @@ hooks.Filters.CONFIG_UNIQUE.add_items(
 )
 
 _ENVIRONMENT = """
+{% set jwt_rsa_key | rsa_import_key %}{{ JWT_RSA_PRIVATE_KEY }}{% endset %}
   environment:
     CAMPUS_CMS_DEBUG: "true"
     CAMPUS_CMS_SECRET_KEY: "{{ CAMPUS_CMS_SECRET_KEY }}"
@@ -50,6 +51,10 @@ _ENVIRONMENT = """
     CAMPUS_CMS_OPENEDX_STUDIO_URL: "http://cms:8000"
     CAMPUS_CMS_OAUTH2_CLIENT_ID: "{{ CAMPUS_CMS_OAUTH2_CLIENT_ID }}"
     CAMPUS_CMS_OAUTH2_CLIENT_SECRET: "{{ CAMPUS_CMS_OAUTH2_CLIENT_SECRET }}"
+    # Public half of the key the LMS signs login JWTs with (same as the LMS settings).
+    CAMPUS_CMS_OPENEDX_JWT_PUBLIC_JWK_SET: '{"keys": [{"kid": "openedx", "kty": "RSA", "e": "{{ jwt_rsa_key.e|long_to_base64 }}", "n": "{{ jwt_rsa_key.n|long_to_base64 }}"}]}'
+    CAMPUS_CMS_OPENEDX_JWT_ISSUER: "{{ JWT_COMMON_ISSUER }}"
+    CAMPUS_CMS_OPENEDX_JWT_AUDIENCE: "{{ JWT_COMMON_AUDIENCE }}"
   volumes:
     - "REPO:/app"
   depends_on: {{ [("mysql", RUN_MYSQL)]|list_if }}
@@ -87,6 +92,8 @@ mysql -u {{ MYSQL_ROOT_USERNAME }} --password="{{ MYSQL_ROOT_PASSWORD }}" --host
 mysql -u {{ MYSQL_ROOT_USERNAME }} --password="{{ MYSQL_ROOT_PASSWORD }}" --host "{{ MYSQL_HOST }}" --port {{ MYSQL_PORT }} -e "CREATE USER IF NOT EXISTS '{{ CAMPUS_CMS_MYSQL_USERNAME }}';"
 mysql -u {{ MYSQL_ROOT_USERNAME }} --password="{{ MYSQL_ROOT_PASSWORD }}" --host "{{ MYSQL_HOST }}" --port {{ MYSQL_PORT }} -e "ALTER USER '{{ CAMPUS_CMS_MYSQL_USERNAME }}'@'%' IDENTIFIED BY '{{ CAMPUS_CMS_MYSQL_PASSWORD }}';"
 mysql -u {{ MYSQL_ROOT_USERNAME }} --password="{{ MYSQL_ROOT_PASSWORD }}" --host "{{ MYSQL_HOST }}" --port {{ MYSQL_PORT }} -e "GRANT ALL ON {{ CAMPUS_CMS_MYSQL_DATABASE }}.* TO '{{ CAMPUS_CMS_MYSQL_USERNAME }}'@'%';"
+# Django's test runner creates and drops test_<database>.
+mysql -u {{ MYSQL_ROOT_USERNAME }} --password="{{ MYSQL_ROOT_PASSWORD }}" --host "{{ MYSQL_HOST }}" --port {{ MYSQL_PORT }} -e "GRANT ALL ON test_{{ CAMPUS_CMS_MYSQL_DATABASE }}.* TO '{{ CAMPUS_CMS_MYSQL_USERNAME }}'@'%';"
 """
 
 # Service account: a staff user (Studio's course run API requires is_staff)

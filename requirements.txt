@@ -1,4 +1,6 @@
 Django==5.2.*
 djangorestframework==3.16.*
 mysqlclient==2.2.*
+Pillow==11.*
+PyJWT[crypto]==2.10.*
 requests==2.32.*
