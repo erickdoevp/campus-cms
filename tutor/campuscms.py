@@ -77,7 +77,13 @@ campus-cms:
   image: campus-cms-dev
   build:
     context: "{REPO}"
-  command: python manage.py runserver 0.0.0.0:8000
+  # Wait for MySQL first: if runserver starts while MySQL is still booting
+  # (e.g. everything restarted together), it fails its checks and then keeps
+  # running without serving anything until a file changes.
+  command: >-
+    sh -c "until python manage.py check --database default >/dev/null 2>&1;
+    do echo 'Esperando a MySQL...'; sleep 2; done;
+    exec python manage.py runserver 0.0.0.0:8000"
   ports:
     - "{{{{ CAMPUS_CMS_PORT }}}}:8000"
   restart: unless-stopped
