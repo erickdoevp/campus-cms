@@ -55,7 +55,7 @@ make tutor ARGS="dev exec campus-cms python manage.py contador <username> --remo
 | Method | URL | Who | Description |
 |---|---|---|---|
 | GET | `/api/health/` | anyone | Service and database are up |
-| GET | `/api/v1/me/` | logged in | `{username, email, is_contador}` |
+| GET | `/api/v1/me/` | logged in | `{username, email, is_contador, course_org}` (`course_org`: the org of the courses the CMS creates or adopts) |
 | GET | `/api/v1/catalog/` | anyone | Courses on sale, for the public site: `{id (course key), title, org, number, short_description, description, image, price, currency, on_sale}` |
 | GET | `/api/v1/catalog/{course_key}/` | anyone | One of them; archived courses are found too (`on_sale: false`), drafts and created ones aren't |
 | POST | `/api/v1/checkout/` | logged in | `{"course_id"}` → `{"order_id", "checkout_url"}`; errors `{"code": "course_not_found" \| "not_purchasable" \| "already_owned" \| "payment_unavailable"}` |
