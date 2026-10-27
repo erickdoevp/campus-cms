@@ -119,11 +119,26 @@ class CheckoutTests(SalesTestCase):
         create.assert_not_called()
 
     @mock.patch("stripe.checkout.Session.create", return_value=SimpleNamespace(id="cs_test_2", url="https://checkout.stripe.test/2"))
-    @mock.patch("stripe.checkout.Session.retrieve")
+    @mock.patch("stripe.checkout.Session.retrieve", return_value=SimpleNamespace(status="open", url="https://checkout.stripe.test/1"))
     def test_price_change_makes_a_new_checkout(self, retrieve, create):
         self.make_order(amount="999")
         assert self.checkout().json()["checkout_url"] == "https://checkout.stripe.test/2"
-        retrieve.assert_not_called()
+
+    @mock.patch("stripe.checkout.Session.create")
+    @mock.patch("stripe.checkout.Session.retrieve")
+    def test_paid_session_without_webhook_grants_access_instead_of_new_checkout(self, retrieve, create):
+        order = self.make_order()
+        session = session_event("evt_x", "checkout.session.completed", order)["data"]["object"]
+        retrieve.return_value = SimpleNamespace(status="complete", payment_status="paid", to_dict=lambda: session)
+
+        response = self.checkout()
+
+        assert response.status_code == 409
+        assert response.json()["code"] == "already_owned"
+        create.assert_not_called()
+        order.refresh_from_db()
+        assert (order.status, order.access) == ("paid", "granted")
+        assert self.enrollment()["is_active"]
 
     def test_my_orders(self):
         self.make_order(status=Order.Status.PAID)

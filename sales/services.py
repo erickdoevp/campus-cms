@@ -48,15 +48,22 @@ def _open_checkout(user, product):
     Return ``(order, url)`` for the user's latest Stripe session for this product
     if it can still be paid, so two tabs/clicks don't create two payable checkouts.
     A price change makes a new checkout.
+
+    If that session was already paid but its webhook hasn't arrived (delayed, or
+    no ``make stripe`` running locally), settle it now and report the course as owned.
     """
     order = Order.objects.filter(
-        user=user, product=product, status=Order.Status.PENDING, amount=product.price,
-        stripe_checkout_session_id__isnull=False,
+        user=user, product=product, status=Order.Status.PENDING, stripe_checkout_session_id__isnull=False,
     ).first()  # newest first (Meta.ordering)
     if order is None:
         return None
     session = stripe.checkout.Session.retrieve(order.stripe_checkout_session_id, api_key=settings.STRIPE_SECRET_KEY)
-    if session.status != "open":
+    if session.status == "complete" and session.payment_status == "paid":
+        order = fulfill_checkout_session(session.to_dict())
+        if order is not None and order.status == Order.Status.PAID:
+            raise PurchaseError("already_owned", "Ya tienes este curso.", status=409)
+        return None
+    if session.status != "open" or order.amount != product.price:
         return None
     return order, session.url
 

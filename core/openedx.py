@@ -12,6 +12,9 @@ from django.core.cache import cache
 
 TOKEN_CACHE_KEY = "openedx:service-token"
 TIMEOUT = 15
+# Studio writes that touch course settings (dates, team) republish and
+# reindex the course before answering, which takes well over 15 s in dev.
+WRITE_TIMEOUT = 90
 
 
 class OpenEdxError(Exception):
@@ -45,7 +48,12 @@ def _access_token():
 
 def request(method, url, **kwargs):
     headers = {"Authorization": f"JWT {_access_token()}", **kwargs.pop("headers", {})}
-    response = requests.request(method, url, headers=headers, timeout=TIMEOUT, **kwargs)
+    timeout = TIMEOUT if method == "GET" else WRITE_TIMEOUT
+    try:
+        response = requests.request(method, url, headers=headers, timeout=timeout, **kwargs)
+    except requests.RequestException as exc:
+        # Callers handle OpenEdxError (e.g. "retry later"); a timeout must not become a 500.
+        raise OpenEdxError(f"{method} {url} -> {type(exc).__name__}: {exc}") from exc
     if response.status_code >= 400:
         raise OpenEdxError(f"{method} {url} -> {response.status_code}: {response.text[:300]}", response.status_code)
     return response.json() if response.content else None

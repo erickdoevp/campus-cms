@@ -1,6 +1,7 @@
 import time
 
 from cryptography.hazmat.primitives.asymmetric import rsa
+from django.conf import settings
 from django.contrib.auth.models import Group, User
 from django.core.management import call_command
 from django.test import TestCase
@@ -26,7 +27,9 @@ class JwtAuthenticationTests(TestCase):
         response = self.get_me(**auth_header(user_id=7, username="ana", email="ana@example.com"))
 
         assert response.status_code == 200, response.content
-        assert response.json() == {"username": "ana", "email": "ana@example.com", "is_contador": False}
+        assert response.json() == {
+            "username": "ana", "email": "ana@example.com", "is_contador": False, "course_org": settings.COURSE_ORG,
+        }
         account = LmsAccount.objects.get(lms_user_id=7)
         assert account.user.username == "ana"
         assert not account.user.has_usable_password()
