@@ -1,7 +1,7 @@
 from django.conf import settings
-from django.conf.urls.static import static
 from django.contrib import admin
-from django.urls import include, path
+from django.urls import include, path, re_path
+from django.views.static import serve
 
 from core.views import health, me
 
@@ -13,6 +13,9 @@ urlpatterns = [
     path("api/v1/", include("sales.urls")),
 ]
 
-if settings.DEBUG:
-    # In production the uploads are served by the web server / object storage.
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+# Uploaded course images, a few hundred KB each: Django serves them in every
+# environment (the volume is only mounted in this container). Move them to
+# object storage if traffic grows.
+urlpatterns += [
+    re_path(r"^media/(?P<path>.*)$", serve, {"document_root": settings.MEDIA_ROOT}),
+]

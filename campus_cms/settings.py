@@ -20,6 +20,10 @@ def env_bool(name, default=False):
 SECRET_KEY = env("CAMPUS_CMS_SECRET_KEY", "insecure-dev-only")
 DEBUG = env_bool("CAMPUS_CMS_DEBUG")
 ALLOWED_HOSTS = [h for h in env("CAMPUS_CMS_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h]
+# Origins allowed to POST to the Django admin (scheme included), e.g. https://cms.example.com
+CSRF_TRUSTED_ORIGINS = [o for o in env("CAMPUS_CMS_CSRF_TRUSTED_ORIGINS").split(",") if o]
+# In `tutor local` Caddy terminates HTTPS and says so in X-Forwarded-Proto.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -36,6 +40,8 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # Serves the Django admin's static files when DEBUG is off (gunicorn).
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -88,7 +94,10 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "static"
-MEDIA_URL = "media/"
+# Absolute in Tutor (http(s)://CAMPUS_CMS_HOST/media/): the API is called by
+# Campus from inside the Docker network, but the image URLs it returns are
+# loaded by the browser.
+MEDIA_URL = env("CAMPUS_CMS_MEDIA_URL", "media/")
 MEDIA_ROOT = BASE_DIR / "media"
 
 # The API only takes the Open edX JWT in the Authorization header (Campus'

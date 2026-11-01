@@ -11,5 +11,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 ENV PYTHONUNBUFFERED=1
+# The Django admin's CSS and JS, served by WhiteNoise.
+RUN python manage.py collectstatic --noinput
 EXPOSE 8000
-CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+# Production (tutor local). `tutor dev` runs runserver instead, with the repo mounted.
+CMD ["gunicorn", "campus_cms.wsgi", "--bind", "0.0.0.0:8000", "--workers", "3", "--timeout", "150", "--access-logfile", "-"]
